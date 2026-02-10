@@ -46,3 +46,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     model_name VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS glossary_jp_refined (
+    id SERIAL PRIMARY KEY,
+    ko_term VARCHAR(255) UNIQUE NOT NULL,
+    jp_term VARCHAR(255) NOT NULL,
+    type VARCHAR(50),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
