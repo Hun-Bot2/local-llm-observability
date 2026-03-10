@@ -1,22 +1,10 @@
-CREATE TABLE IF NOT EXISTS translation_logs (
-    id SERIAL PRIMARY KEY,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    model_name VARCHAR(50),
-    source_lang VARCHAR(10),
-    target_lang VARCHAR(10),
-    input_length INT,
-    output_length INT,
-    latency_ms FLOAT,
-    tokens_per_sec FLOAT,
-    similarity_score FLOAT,
-    input_text TEXT,
-    output_text TEXT
-);
+-- Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE INDEX idx_model ON translation_logs(model_name);
-CREATE INDEX idx_timestamp ON translation_logs(timestamp);
+-- =============================================
+-- Glossary Tables (existing, unchanged)
+-- =============================================
 
--- 영어 전용 단어장
 CREATE TABLE IF NOT EXISTS glossary_en (
     id SERIAL PRIMARY KEY,
     ko_term VARCHAR(255) UNIQUE NOT NULL,
@@ -25,26 +13,12 @@ CREATE TABLE IF NOT EXISTS glossary_en (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 일본어 전용 단어장
 CREATE TABLE IF NOT EXISTS glossary_jp (
     id SERIAL PRIMARY KEY,
     ko_term VARCHAR(255) UNIQUE NOT NULL,
     jp_term VARCHAR(255) NOT NULL,
     type VARCHAR(50) DEFAULT 'common',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 감사 로그 (어느 언어로 번역하다 생긴 로그인지 target_lang 추가)
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id SERIAL PRIMARY KEY,
-    target_lang VARCHAR(10), -- 'en' or 'jp'
-    filename VARCHAR(255),
-    paragraph_index INT,
-    original_text TEXT,
-    llm_reasoning JSONB,
-    final_translation TEXT,
-    model_name VARCHAR(100),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS glossary_jp_refined (
@@ -54,3 +28,89 @@ CREATE TABLE IF NOT EXISTS glossary_jp_refined (
     type VARCHAR(50),
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- =============================================
+-- Blog Posts — MDX frontmatter registry
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS blog_posts (
+    id SERIAL PRIMARY KEY,
+    filename VARCHAR(255) UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    pub_date DATE,
+    hero_image TEXT,
+    tags JSONB DEFAULT '[]',
+    category VARCHAR(100),
+    series VARCHAR(255),
+    series_order INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_blog_posts_category ON blog_posts(category);
+CREATE INDEX idx_blog_posts_series ON blog_posts(series);
+
+-- =============================================
+-- Translation Cache — paragraph-level with embeddings
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS translation_cache (
+    id SERIAL PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL,
+    section_type VARCHAR(50) NOT NULL DEFAULT 'paragraph',
+    section_index INT NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    ko_text TEXT NOT NULL,
+    en_text TEXT,
+    jp_text TEXT,
+    model_name VARCHAR(100),
+    embedding vector(768),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(filename, section_index)
+);
+
+CREATE INDEX idx_cache_filename ON translation_cache(filename);
+CREATE INDEX idx_cache_hash ON translation_cache(content_hash);
+CREATE INDEX idx_cache_embedding ON translation_cache USING ivfflat (embedding vector_cosine_ops);
+
+-- =============================================
+-- Translation Quality — per-file scoring
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS translation_quality (
+    id SERIAL PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL,
+    target_lang VARCHAR(10) NOT NULL,
+    run_id INT,
+    structural_score FLOAT,
+    length_score FLOAT,
+    semantic_score FLOAT,
+    glossary_score FLOAT,
+    composite_score FLOAT,
+    passed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_quality_filename ON translation_quality(filename);
+CREATE INDEX idx_quality_run ON translation_quality(run_id);
+
+-- =============================================
+-- Pipeline Runs — execution tracking
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id SERIAL PRIMARY KEY,
+    trigger_type VARCHAR(50) NOT NULL DEFAULT 'manual',
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    total_files INT DEFAULT 0,
+    cached_sections INT DEFAULT 0,
+    new_sections INT DEFAULT 0,
+    gpu_time_sec FLOAT DEFAULT 0,
+    estimated_cost FLOAT DEFAULT 0,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP
+);
+
+CREATE INDEX idx_pipeline_status ON pipeline_runs(status);
