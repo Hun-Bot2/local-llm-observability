@@ -5,9 +5,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     python3 \
     python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir \
+RUN python3 -m venv /opt/worker-venv
+RUN /opt/worker-venv/bin/pip install --no-cache-dir \
     fastapi \
     uvicorn \
     requests \

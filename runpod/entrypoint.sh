@@ -38,7 +38,7 @@ echo "Ollama serving on port 11434"
 
 # Start the worker API
 echo "Starting worker API on port 8000"
-python3 /app/worker.py &
+/opt/worker-venv/bin/python /app/worker.py &
 WORKER_PID=$!
 
 cleanup() {
