@@ -80,11 +80,32 @@ def _normalize_lang(lang: str) -> str:
 def _section_suffix(section_type: str) -> str:
     if section_type == "frontmatter_tags":
         return (
-            "\n\nIMPORTANT: The input is a tag list. Translate each tag but preserve "
-            "the original list format. Output only the list."
+            "\n\nIMPORTANT: The input is a frontmatter tags value. DO NOT change the frontmatter structure. "
+            "Preserve the bracketed list format exactly, including commas, quotes, and spacing style where possible. "
+            "Translate only the tag text. Output only the value."
+        )
+    if section_type == "frontmatter_title":
+        return (
+            "\n\nIMPORTANT: This is a frontmatter title value. DO NOT change the frontmatter structure. "
+            "Translate only the value, keep it concise, and output exactly one line with no extra explanation."
+        )
+    if section_type == "frontmatter_description":
+        return (
+            "\n\nIMPORTANT: This is a frontmatter description value. DO NOT change the frontmatter structure. "
+            "Translate only this single value. Do not expand, summarize, add headings, bullet points, extra lines, "
+            "or surrounding keys. Output exactly one line."
         )
     if section_type.startswith("frontmatter"):
-        return "\n\nIMPORTANT: This is short frontmatter metadata. Output only the translation."
+        return (
+            "\n\nIMPORTANT: This is frontmatter metadata. DO NOT change the frontmatter structure. "
+            "Translate only the value and output only the translated value."
+        )
+    if section_type == "code":
+        return (
+            "\n\nIMPORTANT: The input is a fenced code block. Preserve the code, indentation, fences, "
+            "identifiers, URLs, and string syntax exactly. Translate only human-language comments and "
+            "docstrings into the target language. Do not add explanations."
+        )
     return ""
 
 

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>local-llm-translator</title>
+    <meta
+      name="description"
+      content="Operations dashboard for the local-llm-translator translation pipeline."
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div class="hero__copy">
+          <p class="eyebrow">Translation Ops</p>
+          <h1>Run, inspect, and score your multilingual MDX pipeline.</h1>
+          <p class="hero__text">
+            Static dashboard for your Firebase-hosted control plane. Hook this up to Cloud Run later.
+          </p>
+        </div>
+        <div class="hero__panel">
+          <p class="hero__panel-label">Current Mode</p>
+          <h2 id="status-badge">Mock Data</h2>
+          <p class="hero__panel-text">
+            Configure your Cloud Run base URL in <code>frontend/app.js</code> when the API is ready.
+          </p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel panel--trigger">
+          <div class="panel__header">
+            <div>
+              <p class="section-label">Run Trigger</p>
+              <h2>Start Translation</h2>
+            </div>
+            <span class="panel__status" id="trigger-state">Local Preview</span>
+          </div>
+
+          <form id="trigger-form" class="trigger-form">
+            <label>
+              Source file
+              <input
+                id="file-input"
+                type="text"
+                name="file"
+                value="src/Algorithm_Bot_01.mdx"
+                placeholder="src/Algorithm_Bot_01.mdx"
+              />
+            </label>
+
+            <label>
+              Target language
+              <select id="lang-select" name="lang">
+                <option value="en">English</option>
+                <option value="jp">Japanese</option>
+              </select>
+            </label>
+
+            <label>
+              Trigger source
+              <select id="mode-select" name="mode">
+                <option value="manual">Manual</option>
+                <option value="weekly">Weekly schedule</option>
+              </select>
+            </label>
+
+            <button type="submit" class="button">Queue translation</button>
+          </form>
+
+          <div id="trigger-result" class="notice">
+            No live API connected yet. Submissions currently update local preview state only.
+          </div>
+        </section>
+
+        <section class="panel metrics">
+          <div class="panel__header">
+            <div>
+              <p class="section-label">Snapshot</p>
+              <h2>Pipeline Health</h2>
+            </div>
+          </div>
+
+          <div class="metrics__grid" id="metrics-grid"></div>
+        </section>
+
+        <section class="panel panel--wide">
+          <div class="panel__header">
+            <div>
+              <p class="section-label">Runs</p>
+              <h2>Recent Pipeline Runs</h2>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Status</th>
+                  <th>File</th>
+                  <th>Lang</th>
+                  <th>Cache</th>
+                  <th>Cost</th>
+                  <th>Started</th>
+                </tr>
+              </thead>
+              <tbody id="runs-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="section-label">Documents</p>
+              <h2>Latest Outputs</h2>
+            </div>
+          </div>
+
+          <div class="docs-list" id="docs-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="section-label">Quality</p>
+              <h2>Low-Score Sections</h2>
+            </div>
+          </div>
+
+          <div class="issues-list" id="issues-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

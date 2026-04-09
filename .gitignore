@@ -31,6 +31,9 @@ glossary_backup.sql
 postgres_data/
 grafana_data/
 
+# Firebase
+.firebase/
+
 # OS
 .DS_Store
 Thumbs.db

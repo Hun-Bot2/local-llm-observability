@@ -97,6 +97,30 @@ CREATE INDEX idx_quality_filename ON translation_quality(filename);
 CREATE INDEX idx_quality_run ON translation_quality(run_id);
 
 -- =============================================
+-- Translation Sections — per-section inference metrics
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS translation_sections (
+    id SERIAL PRIMARY KEY,
+    run_id INT,
+    filename VARCHAR(255) NOT NULL,
+    section_index INT,
+    section_type VARCHAR(50) NOT NULL DEFAULT 'paragraph',
+    target_lang VARCHAR(10) NOT NULL,
+    model_name VARCHAR(100),
+    source_text TEXT NOT NULL,
+    translated_text TEXT NOT NULL,
+    input_tokens INT DEFAULT 0,
+    output_tokens INT DEFAULT 0,
+    latency_ms FLOAT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_translation_sections_run ON translation_sections(run_id);
+CREATE INDEX idx_translation_sections_file ON translation_sections(filename);
+CREATE INDEX idx_translation_sections_lang ON translation_sections(target_lang);
+
+-- =============================================
 -- Pipeline Runs — execution tracking
 -- =============================================
 
@@ -114,3 +138,27 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 );
 
 CREATE INDEX idx_pipeline_status ON pipeline_runs(status);
+
+-- =============================================
+-- Weekly Reports — automated analytics
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS weekly_reports (
+    id SERIAL PRIMARY KEY,
+    week_start DATE NOT NULL,
+    week_end DATE NOT NULL,
+    posts_translated INT DEFAULT 0,
+    total_sections INT DEFAULT 0,
+    cached_sections INT DEFAULT 0,
+    new_sections INT DEFAULT 0,
+    avg_quality_en FLOAT,
+    avg_quality_jp FLOAT,
+    total_gpu_time_sec FLOAT DEFAULT 0,
+    total_cost FLOAT DEFAULT 0,
+    pipeline_runs INT DEFAULT 0,
+    cache_hit_rate FLOAT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(week_start)
+);
+
+CREATE INDEX idx_weekly_reports_week ON weekly_reports(week_start);
