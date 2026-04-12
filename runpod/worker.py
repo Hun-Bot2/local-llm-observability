@@ -179,9 +179,10 @@ def translate(payload: TranslateRequest) -> dict[str, Any]:
             timeout=300,
         )
         latency_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        raw_output = response.get("message", {}).get("content", "")
         translated = _cleanup_translation(
             section.section_type,
-            response.get("message", {}).get("content", ""),
+            raw_output,
         )
 
         results.append(
@@ -192,6 +193,14 @@ def translate(payload: TranslateRequest) -> dict[str, Any]:
                 "ko_text": section.ko_text,
                 "translated": translated,
                 "model": model,
+                "backend": "runpod_worker",
+                "endpoint": "/translate",
+                "system_prompt": prompt,
+                "user_prompt": section.ko_text,
+                "glossary_text": payload.glossary_text,
+                "raw_response": response,
+                "raw_output": raw_output,
+                "normalized_output": translated,
                 "input_tokens": response.get("prompt_eval_count", 0),
                 "output_tokens": response.get("eval_count", 0),
                 "latency_ms": latency_ms,
