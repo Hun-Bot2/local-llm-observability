@@ -1,0 +1,141 @@
+---
+title: '알고리즘 복습 호율화'
+description: '늦게 알고리즘 공부를 시작한 사람들을 위한 알고리즘 공부 효율화(?)'
+pubDate: '2025-12-24'
+heroImage: '/images/slack_bot.png'
+tags: ['algorithm', 'bot']
+category: 'algo_bot'
+series: 'Algorithm Bot'
+seriesOrder: 1
+---
+
+## 알고리즘 학습
+우선, 저는 비교적 늦게 알고리즘 공부를 시작한 사람입니다. 물론, 알고리즘이 중요한 것은 알고 있었지만 알고리즘을 푸는게 재밌다! 라고 하면서 푸는 사람들을 보면
+음... 저는 그런 타입이 아니였고, 늦게나마 취업을 준비하면서 알고리즘 공부를 시작했습니다.
+전에 공부를 했을 때는 강의 보기 -> 문제 풀기 -> 모르는거 복습하기 -> 정리하기 순으로 공부를 했었고, 이렇게 진행했을 때 과거에 풀었던 문제들을 까먹는 경우가 많았습니다.
+
+그래서 이번에는 에빙하우스 망각 곡선 이론을 기반으로 복습 주기를 정하고, 그에 맞춰서 복습할 문제들을 자동으로 알려주는 봇을 만들어보았습니다.
+Slack Webhook을 이용해서 매일 아침에 복습할 문제들을 알려주도록 했습니다.
+
+저는 GitHub Pages + Docusaurus로 알고리즘 문제들을 정리하고 있었기 때문에, Docusaurus로 정리한 문제들 중에서 복습 주기에 맞는 문제들을 추출해서 Slack으로 보내도록 했습니다.
+Github Repository의 Git 로그를 이용해서 각 문제 파일의 최초 생성 날짜를 추출하고, 오늘 날짜와 비교해서 복습 주기에 맞는 문제들을 선별했습니다.
+해당 코드는 제 파일 기준이기 때문에, 필요에 맞게 경로를 수정해서 사용하면 됩니다.
+
+이게 효율적인지는 아마 3개월쯤 해봐야 알 것 같습니다. **2025-2-28**에 다시 후기를 남기도록 하겠습니다.
+
+23일날 2문제를 풀었으니 24일에는 2문제를 복습해야 한다고 알림이 왔네요;; 
+24일에는 동알한 2문제를 복습하고, 추가로 필요한 문제를 더 풀어야겠죠? 복습량이 좀 걱정되기는 하는데 ... 일단 해봐야겠습니다.
+
+## 추가 설정
+아 추가적으로, 설정할 부분으로 해당하는 Github Repository -> Settings -> 왼쪽 메뉴 중 Secrets and variables -> Actions -> New repository secret**에서 SLACK_WEBHOOK_URL이라는 이름으로 Slack Webhook URL을 등록해주어야 합니다.
+
+Slack Webhook 설정 방법은 [https://api.slack.com/messaging/webhooks](https://api.slack.com/messaging/webhooks)에서 확인할 수 있습니다.
+
+## 코드
+```python
+import os
+import datetime
+import subprocess
+import requests
+
+# [설정] 복습 주기 (에빙하우스 망각 곡선 이론 기반)
+REVIEW_CYCLES = [1, 3, 7, 14, 30] 
+SLACK_URL = os.environ.get("SLACK_WEBHOOK_URL")
+
+# Docusaurus 배포 URL (사용자 리포지토리 기준)
+BASE_DOCS_URL = "https://hun-bot2.github.io/docs"
+
+# 감시할 최상위 알고리즘 경로
+TARGET_DIR = "study/docs/Algorithm"
+# 제외 파일 목록
+EXCLUDE_FILES = ["intro.md", "intro.mdx", "_category_.json"]
+
+def get_first_commit_date(filepath):
+    """Git 로그에서 파일의 최초 생성 날짜를 추출합니다."""
+    try:
+        # --diff-filter=A 옵션으로 최초 추가 시점의 날짜만 가져옴
+        cmd = ["git", "log", "--diff-filter=A", "--follow", "--format=%as", "--reverse", filepath]
+        output = subprocess.check_output(cmd).decode("utf-8").strip()
+        return output.split('\n')[0] if output else None
+    except:
+        return None
+
+if __name__ == "__main__":
+    today = datetime.date.today()
+    review_list = []
+
+    if not os.path.exists(TARGET_DIR):
+        print(f"Path not found: {TARGET_DIR}")
+        exit(0)
+
+    for root, dirs, files in os.walk(TARGET_DIR):
+        for f in files:
+            # 제외 대상 파일 필터링
+            if f in EXCLUDE_FILES or not (f.endswith(".md") or f.endswith(".mdx")):
+                continue
+            
+            path = os.path.join(root, f)
+            first_date_str = get_first_commit_date(path)
+            
+            if first_date_str:
+                first_date = datetime.datetime.strptime(first_date_str, "%Y-%m-%d").date()
+                diff = (today - first_date).days
+                
+                # 복습 주기에 해당하는 경우에만 슬랙 메시지에 추가
+                if diff in REVIEW_CYCLES:
+                    # Docusaurus URL 경로 생성
+                    # 예: study/docs/Algorithm/Baekjoon/DP/11660.md 
+                    # -> Algorithm/Baekjoon/DP/11660
+                    rel_path = os.path.relpath(path, "study/docs").replace(".mdx", "").replace(".md", "")
+                    link = f"{BASE_DOCS_URL}/{rel_path}"
+                    
+                    # 플랫폼 이름 추출 (Algorithm 폴더 바로 아래의 폴더명)
+                    # 구조: Algorithm/플랫폼/유형/문제.md
+                    path_parts = os.path.relpath(path, TARGET_DIR).split(os.sep)
+                    platform = path_parts[0] if len(path_parts) > 1 else "General"
+                    
+                    review_list.append(f"• [{platform}] <{link}|{f}> (D+{diff} 복습)")
+
+    if review_list:
+        msg = f"오늘의 알고리즘 복습 (기준일: {today})\n" + "\n".join(review_list)
+        if SLACK_URL:
+            requests.post(SLACK_URL, json={"text": msg})
+        else:
+            print("Slack URL 미설정. 결과만 출력합니다:\n", msg)
+    else:
+        print("오늘은 복습할 문제가 없습니다.")
+```
+### GitHub Actions workflow 설정
+
+```yml
+name: Algorithm Daily Review Bot
+
+on:
+  schedule:
+    # 매일 한국 시간 오전 9시 (UTC 00:00) 실행
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 테스트를 위해 수동 실행 버튼 활성화
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # 전체 Git 히스토리를 가져와야 날짜 계산 가능
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run notify script
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} #
+        run: python study/scripts/notify.py
+```
+

@@ -1,0 +1,143 @@
+---
+title: アルゴリズムRAGの開発プロセスとモデルの性能比較
+description: 組み込みモデルの性能比較
+pubDate: '2026-01-08'
+heroImage: /images/ALGO_RAG/rag_performance_analysis.png
+tags:
+- algorithm
+- RAG
+- LLM
+- automation
+category: algo_bot
+series: Algorithm Bot
+seriesOrder: 3
+---
+[先編] (http://algorithm_Bot_02.mdx) から続きます. ##アーキテクチャは,これまで考えられていた全体的な流れです. ![alt text] (http://algo_RAG/algo-RAG.svg)
+
+**本格的な開発の前に勉強し,組み込みモデルを比較してみることにしました.**
+
+時間のかかる作業であり,分析が正しいかわからないので,コミュニティで検証されるでしょうが,この記事を読んだら,フィードバックをお願いします.
+
+##データ収集・事前処理
+
+* **LeetCode:** Leetcode GraphQL APIを介して2025年までには,全体の問題集 (約3,500個以上) を設定しています.
+
+* **Baekjoon:** solved.ac APIとウェブクロール
+
+それぞれ100個のデータを収集し,集めたデータは,埋め込み性能を最大限に高めるために以下の処理を行いました.
+
+**HTMLとノイズ削除:** HTMLタグと不必要な語彙を削除しました.
+
+* **検索最適化テキスト構成:** タイトル,タグ,コンテンツを組み合わせ,モデルが問題のカテゴリーと制限条件を明確に認識できるように `embedding_text`フィールドを作成しました.
+
+**Logical Skeleton:** (AIはこれを好む) ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ ヽ 1.データ収集 (Data Collection) ─baekjoon_data_collection.py →baekjoon_raw_data.jsonl (100個) ─leetcode_data_collection.py →leet_raw_data.jsonl (100個) 
+
+2.データ処理 (Preprocessing) ─preprocess.py → *_preprocessed.jsonl │ ─ HTML/マークダウン削除,コアロジック抽出 ─refine_leetcode.py → leetcode_refined.jsonl ─LLMベースの論理骨格解剖(Logical Skeleton)抽出 
+
+3.データ正規化 (Normalization) ─ improve_recall.py → baekjoon_refined.jsonl │ ─ 백준データも英語の論理骨格に変換される (Logical Skeleton タグが表示されている場所) ─ data_normal.py → baekjoon_normalized.jsonl ─頭蓋骨は"Logical Skeleton: ") を削除する -> "embedding_text"に変換する
+
+4. Ground Truth 構築 (GT Creation) ─ ground_truth_finder.py → potential_gt.json │ ─ LLMで候補者を自動抽出して検定する─leetcode_match_pgt.py → ground_truth_v2.json ─100セット BJ-LC 正式双式完成
+
+5.モデル評価 (Model Benchmarking) ─ evaluate_model.py → OpenAI text-embedding-3-small ─ evalute_model_ver2.py → Jina-v3 (1024 dim) ─ evalute_model_ver3.py → BGE-M3 (Local) ─ Recall@K,MRR測定 ```
+
+Ground Truthを100個作っていたので,ランダムに100個ずつ抽出して実験を行いました.通常はGloden Set (グロデンセット) と呼ばれていました.これは人間が自分でマッピングする必要があるとされています.
+
+## 組み込みモデル比較と検証 (Embedding Model Benchmark)
+
+最も洗練された知識マッピングのために,3つの主要な組み込みモデルを対象とした性能検証 (Pilot Test) を実施しました.
+
+**端末モデル:Jina v3,OpenAIテキスト組み込み-3-small,BGE-M3.**
+
+*##評価指標 (メトリックス) * #RECALL@K:上 Kの結果のうち正しい答えを含む割合. *MRR (Mean Reciprocal Rank):正しい答えが表示された順序の逆数平均.
+
+##ベンチマーク結果 (100セット ゴールデンセット基準) モデル リコール1 リコール5 リコール10 MRR オープンAI-v3 (小) 0.22 0.50 0.65 0.354 Jina-v3 (1024dim) 0.17 0.47 0.63 0.319 BGE-M3 (ローカル) 0.15 0.40 0.53 0.272
+
+OpenAI-v3 (小型) モデルは最高性能を示した.
+
+**Recall@10:**は,素直な回答候補者を10位に好転させ, **Recall@1:**は,素直な回答を1位に合わせる割合が比較的低い (22%) 
+
+[img](/images/ALGO_RAG/rag_performance_analysis.png) !
+
+---  ---
+
+実際,この結果を見た後,ちょっと変な気持ちになりました.私が抽出したデータは3つで, [RAW, Preprocessed,Refined] がこれだけできるのでしょうか?と疑問に思いました.
+
+そこで,全体的なプロセスを分析し,次の追加実験を行いました.データ保存形式は .jsonlです.
+
+**** >[1] テキスト統計:** 長さ,TTR,騒音比,キーワード密度 > > **[2] 埋め込み品質:** イントラ/インタークラスター距離,シルウエットスコア > > **[3] t-SNE & UMAP** > > **[4] クロスリンガルアライナメント:** KR \<-> EN
+
+## [1]テキスト統計![テキスト・テキストです.](/画像/ALGO_RAG/stage1_text_statistics.png)
+
+Leetcode は,グラフql API を介して直立的に抽出する論理を使用し, ```jsonl {"id": "14", "title": "Longest Common Prefix", "titleSlug": "longest-common-prefix", "difficulty": "Easy", "content": "<p>Write a function to find the longest common prefix string amongst an array of strings.</p>\n\n<p>If there is no common prefix, return an empty string <code>&quot;&quot;</code>.</p>\n\n\n<p>" titleSlug": "longest-common-prefix", "difficulty": "Easy", "content": <p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p><p>
+
+## [2] 組み込み品質はJina-v3とOpenAI-v3 (small) モデルで,各ファイルに組み込みを作成しました.使用量はほとんどありません.
+
+画像/画像/ALGO_RAG/openai_usage.png) ```jsonl BAEKJOON DATASETS: Raw: 100 items フィールド: ['id', 'title', 'difficulty', 'tags', 'content', 'embedding_model', 'embedding_dim', 'embedding_name', 'embedding_name_model', 'embedding_name_dim', 'embedding_name_openai', 'embedding_openai_model', 'embedding_name_openai_dim' 予備品: 100 items フィールド: ['id', 'title', 'difficulty', 'tags', 'diment_content', 'diment_cleaned', 'diment_name', 'diment_name', 'embedding_name', 'embedding_name', 'embedding_name', 'embembedding_name', 'embedded_name', 'embedded_name', 'embedd_name', 'embedd_name', 'embedd_name', 'embedd_name', 'embedd_name', 'emb
+
+DATASETS: Raw: 100 items フィールド: ['id', 'title', 'titleSlug', 'difficulty', 'titleSlug', 'content', 'tags', 'embedding_model', 'embedding_dim', 'embedding_jina_model', 'embedding_model', 'embedding_dim', 'embedding_jina_openai', 'embedding_model', 'embedding_openai_dim' プリプロセッサ: 100 items フィールド: ['id', 'title', 'titleSlug', 'titleSlug', 'difficulty', 'content' tags', 'embedding_cleaned', 'embedding_text', 'embedding_model', 'embedding_dim', 'embedding_model', 'embedding_dim', 'embedding_name', 'embedding_model', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded', 'embedded
+
+###Silhouette Score K-Meansなどのクラスタリングアルゴリズムを使用してデータをグループ化するとき,グループが適切に分類されているか確認する方法の一つです.
+
+これは [-1~1] の値であるため,Baekjoon 問題のLeetcode 問題をよくマッチすることを目的としているので,バックルーン問題間の距離が$a ((i) >b ((i) $になるように,バックルーン問題との距離が (a) >バックルーン問題とリーートコード問題との距離が (b) になるようにすることを目的としています.
+
+$$ s(i) = \frac{b(i) - a(i)}{max(a(i), b(i))} $$
+
+$a(i) $ (Intra-cluster distance): 私が属しているグループ内の他のデータとの平均距離です. - $b(i) $ (Inter-cluster distance): 私が属していない最も近いグループとの平均距離です.
+
+[デザインです.](/画像/ALGO_RAG/stage2_embedding_quality.png)
+
+シルホーエット・スコア
+
+Raw -> Preprocessed に移行すると,最大の改善がありましたが,Refined に移行すると,むしろ減少を示しました.これは,preprocessing が組み込み品質に最大の影響を与えたことを示しています.
+
+### 2.イントラクラスタ距離は,集群内のデータ同士の距離を測定する.値が低いほど,同じカテゴリーの問題はベクトル空間でに集まる.
+
+バクルーン (ブルー) は,RawからRefinedに進むにつれて,距離が急激に減少する.これは,浄化過程を経て,バクルーンの問題が相互に一致するベクトル表現を得ていることを意味します.リートコードは,Preprocessedでピークを記録し,再び低下しているように見える.
+
+インタークラスタ距離 (Inter-cluster Distance) は,異なるクラスタ間の距離を測定します. 白色グループとリートコードグループ. 値が高くなるほど,二つのグループがはっきりと区別されます.
+
+バクジュンは,ステップが進むにつれて距離が縮小し,バクジュンのデータがリートコードデータのベクトル領域に近づいていることを示唆している.つまり,二つのプラットフォーム間の"意味のある距離"が縮小されていると解釈できる.
+
+Cluster Quality Ratio (Intra/Inter Ratio) は,集団内の距離と集団間の距離の比率です.この値は低いほど理想的な状態です.
+
+両データセットは,Preprocessed段階では最低点を記録します.その後はRefined段階では少し上昇すると,過度な整理がデータの特性を部分的に薄めた可能性があることを示しています. #### 5. 距離分布 (Box Plots) は,バックルーンのデータの距離分布を視覚化しています. 中心値 (Box line) とデータの拡散程度を見ることができます.
+
+イントラクラスタ:段階が進むにつれて,箱の高度が低下し,位置が下がる.つまり,データは極端な理想がなく,任意に集約される.
+
+クラスター間:外部との距離分布も下向きに安定し,他のデータセットとの比較が可能な限り進んでいる.
+
+### 6.Embedding Quality Heatmapは,すべての指標をまとめ,視覚化された表です.緑に近づくほど,その指標から優れたパフォーマンスを示します.
+
+**BJ Prep (白調前処理) **とLC Prep (リートコード前処理) 熱帯では緑色の濃度が最も高い.
+
+現在のデータセットでは, 'Preprocessed'状態の埋め込みが検索効率が最も高いという統計的な結論を導き出せる.
+
+このような結果が出ると,洗練された段階で問題があった場合,こうなったことを確認します.
+
+しかし,AIがとても強調し,気に入ったバックジュンデータセットから ->"embedding_text"にインベッディングテキストをLogical Skeletonに置き換えたことは,Leetcodeデータとは異なり,ベクトル空間から離れていたのではないかと推測されています.
+
+####解決: <u>[アルゴリズム開発者 04](../アルゴリズム_bot_04)</u>
+
+## [3] t-SNE & UMAP
+
+#### 백준問題 t-SNE視覚化![tsne-baekjoon](/images/ALGO_RAG/stage3a_tsne_baekjoon.png) 
+
+###Leetcodeの問題 t-SNE視覚化![tsne-leetcode](/images/ALGO_RAG/stage3b_tsne_leetcode.png) #
+
+####韓国語 -> 英語の処理プロセス![クロスラングです.](/images/ALGO_RAG/stage3c_cross_language_alignment.png) 
+
+####UMAPビジュアル化 (洗練されたデータセット) ![umap_refined umap_refined は](/images/ALGO_RAG/stage3c_umap_3d_refined.png) #
+
+## [4] Cross-lingual Alignment ![クロス・ラング・アラインメント](/images/ALGO_RAG/stage4_cross_lingual_alignment.png)
+
+##Jina v3 vs OpenAI text-embedding-3-smallで作業した前処理プロセスと分析に基づいて,Jina v3と OpenAI text-embedding-3-smallモデルの性能差を比較しました.
+
+OpenAIモデルは全体的により良いパフォーマンスを示し,その後,App開発に OpenAIモデルを採用することを決定しました.
+
+![jina-vs-openai](/images/ALGO_RAG/model_comparison_jina_vs_openai.png) について
+
+!//images/ALGO_RAG/cross_lingual_comparison_jina_vs_openai.png) 
+
+## 結論 ## そして次のステップ このインベッディングモデルの比較とデータプリプロセスの分析により,以下の結論を導き出しました. 1.OpenAIテキスト・インベッディング-3-smallモデルはJina v3よりも優れたパフォーマンスを示しています. 2.データプリプロセスはインベッディング品質に大きく影響します. 3.洗練された段階での過度の調整は,性能低下を引き起こす可能性があります.
+
+まず,洗練された段階では論理骨格を取り除いて,2つのデータセットを同じ方法で調整した後,ベンチマークを再び戻そうとします. ``` [アルゴリズムのタイプ] {アルゴリズムの名前} [問題要約] {Core logic description} [Complexity] Time: {Time}, Space: {Space} ``

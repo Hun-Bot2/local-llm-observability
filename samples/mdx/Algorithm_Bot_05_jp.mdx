@@ -1,0 +1,69 @@
+---
+title: 'アルゴリズム RAG の改良'
+description: 'FAISSを使用する必要がなく、NumPy計算に変更しました。'
+pubDate: '2026-01-15'
+heroImage: '/images/ALGO_RAG/Algo-RAGv2.png'
+tags: ['algorithm', 'RAG', 'LangChain', 'automation']
+category: 'algo_bot'
+series: 'Algorithm Bot'
+seriesOrder: 5
+---
+
+<u>*[前回の記事](../algorithm_bot_04)*</u>に引き続き。
+
+## FAISS の削除と NumPy 計算の導入
+以前の投稿で、LangChain を使用して RAG システムを構築したと述べましたが、学習のために再評価を行った結果、FAISSを使用する理由が見つからず、効率性を考慮して NumPy の計算に変更することにしました。
+
+まず最初に、FAISS は NumPy でも同様のことを行えるのか？という疑問があり、小さな実験を行いました。
+
+## 実験: FAISS vs. NumPy -類似度検索速度比較
+確かに、FAISS は高速ですが、以下の結果をご覧いただくとわずか 0.005秒 の差であり、特に問題がないレベルであるため、FAISS を使用する必要性を感じませんでした。
+
+### パフォーマンス比較の結果 (Top-5 検索)
+
+| 方法 | 所要時間 | 適合度 |
+|------|-----------|-----------|
+| **FAISS** | 0.002095 秒 | 🥇 第一位 |
+| **NumPy (Python)** | 0.007358 秒 | 🥈 第二位 |
+| **Scikit-learn (Brute Force)** | 0.023916 秒 | 🥉 第三位 |
+
+### 詳細結果
+
+#### [A] FAISS
+- **所要時間**: 0.002095 秒
+- **インデックス**: `[0, 160, 2260, 1256, 307]`
+- **距離値 (L2)**: `[0.0, 0.364, 0.397, 0.413, 0.415]`
+
+#### [B] Scikit-learn (Brute Force)
+- **所要時間**: 0.023916 秒
+- **インデックス**: `[0, 160, 2260, 1256, 307]`
+- **距離値 (L2)**: `[0.0, 0.603, 0.630, 0.643, 0.644]`
+
+#### [C] NumPy (Python)
+- **所要時間**: 0.007358 秒
+- **インデックス**: `[0, 160, 2260, 1256, 307]`
+- **距離値 (二乗L2)**: `[0.0, 0.364, 0.397, 0.413, 0.415]`
+
+## GitHub Actions の実行時間短縮
+
+### ワークフローの実行時間
+約 1 分の短縮に成功したため、適切な選択だったと感じています。
+
+<div style="display: flex; gap: 2rem; justify-content: center; align-items: flex-start; flex-wrap: wrap; margin-bottom: 3rem;">
+  <div style="flex: 1; min-width: 300px; max-width: 600px; text-align: center;">
+    <p style="font-size: 1.25rem; font-weight: bold; margin-bottom: 1rem; color: #fca5a5;">Before</p>
+    <img src="/images/ALGO_RAG/github_actions_before.png" alt="before" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" />
+  </div>
+  <div style="flex: 1; min-width: 300px; max-width: 600px; text-align: center;">
+    <p style="font-size: 1.25rem; font-weight: bold; margin-bottom: 1rem; color: #86efac;">After</p>
+    <img src="/images/ALGO_RAG/github_actions_after.png" alt="after" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" />
+  </div>
+</div>
+
+# 結論
+残りのタスクは以下の 4点に加え、使用しながら改良を重ねることです。
+
+1. 初期環境設定なしで使用可能にする（？）
+2. 他者が利用しやすい形で構築する（？）
+3. 解いたLeetCode の問題を成長する木の形式で可視化する -> 問題を解くと木が成長し、解いた問題は光る葉っぱ形式（？）、難易度に応じて異なる色を使用
+4. グラフネットワークの可視化

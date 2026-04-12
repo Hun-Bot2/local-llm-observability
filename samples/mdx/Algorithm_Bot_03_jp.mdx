@@ -1,0 +1,243 @@
+---
+category: algo_bot
+description: エンベディングモデルの性能比較
+heroImage: /images/ALGO_RAG/rag_performance_analysis.png
+pubDate: '2026-01-08'
+series: Algorithm Bot
+seriesOrder: 3
+tags:
+- algorithm
+- RAG
+- LLM
+- automation
+title: アルゴリズムRAG開発過程およびモデル性能比較
+---
+
+[前回の記事](./Algorithm_Bot_02.mdx)に引き続き、以下のような全体の流れについて考えています。
+![説明文](/images/ALGO_RAG/algo-RAG.svg)
+
+本格的な開発を始める前に、学習も兼ねて埋め込みモデルの比較を行おうと思います。
+
+予想以上に時間がかかった作業で、自分の分析が正しいかどうか自信がないため、コミュニティの方々に検証していただければと思います。もし、この記事を読まれた方はフィードバックをお寄せいただけると幸いです！
+
+## データ収集および前処理 (Data Acquisition and Preprocessing)
+
+* **LeetCode:** Leetcode GraphQL API を利用し、2025年時点の全問題セット（約3,500問以上）
+
+* **Baekjoon:** solved.ac API とウェブスクレイピング
+
+それぞれ100件のデータを収集しました。収集したデータは埋め込み性能を最大化するために以下の前処理を行いました。
+
+* **HTMLおよびノイズ除去:** HTMLタグや不要な記述語を取り除きました。
+ 
+* **検索最適化用テキスト構成:** Title, Tags, Content を組み合わせ、モデルが問題のカテゴリと制約条件を明確に理解できるように `embedding_text` フィールドを作成しました。
+
+* **論理的スケleton:** (AIにとってこの説明が大好きです) 問題の核心的なアルゴリズム論理を要約した `logical_skeleton` フィールドをLLMを使用して生成しました（Baekjoonは韓国語ベースであるため、英訳された内容を含んでいます）
+```text
+1. データ収集 (Data Collection)
+   ├─ baekjoon_data_collection.py → baekjoon_raw_data.jsonl (100件)
+   └─ leetcode_data_collection.py → leetcode_raw_data.jsonl (100件)
+```
+
+---
+データ前処理（Preprocessing）
+├─ preprocess.py                → *_preprocessed.jsonl
+│  └─ HTML/マークダウンの削除、核心ロジック抽出
+└─ refine_leetcode.py           → leetcode_refined.jsonl
+   └─ LLMベース論理構造（Logical Skeleton）抽出
+
+データ正規化（Normalization）
+├─ improve_recall.py            → baekjoon_refined.jsonl
+│  └─ バージョン英語の論理構造に変換（ここで"Logical Skeleton"タグが付く）
+└─ data_normal.py               → baekjoon_normalized.jsonl
+   └─ 接頭辞("Logical Skeleton: ")削除 -> "embedding_text"へ変換
+
+Ground Truth構築（GT Creation）
+├─ ground_truth_finder.py       → potential_gt.json
+│  └─ LLMによる候補の自動抽出と審査
+└─ leetcode_match_pgt.py        → ground_truth_v2.json
+   └─ 100セットBJ-LC正解ペア完成
+
+モデル評価（Model Benchmarking）
+├─ evaluate_model.py            → OpenAI text-embedding-3-small
+├─ evalute_model_ver2.py        → Jina-v3 (1024 dim)
+└─ evalute_model_ver3.py        → BGE-M3 (ローカル)
+   └─ Recall@K、MRR測定
+
+---
+
+この翻訳では、「データ前処理」から「モデル評価」までのプロセスと各ステップの詳細なタスクを日本語に翻訳しました。技術用語や特殊文字はそのまま維持し、日本語テクノロジーブログスタイルに合わせた表現を使用しています。
+
+### なぜ100個だけなのか？
+
+Ground Truthを100個作成したため、ランダムに100個ずつ抽出して実験を行いました。通常Golden Set（？）と呼ばれているものだと思います。これは人が直接マッピングする必要があるとのことでした。
+
+##  임베딩 모델 비교 및 검증 (Embedding Model Benchmark)
+
+最も精密な知識マッピングを行うために、3つの主要なエンベディングモデルを対象に性能検証（パイロットテスト）を行いました。
+
+**比較モデル：Jina v3, OpenAI text-embedding-3-small, BGE-M3.**
+
+### 評価指標 (Metrics)
+* Recall@K: 上位 K 個の結果中で正解が含まれている割合。
+* MRR（Mean Reciprocal Rank）: 正解が現れる順位の逆数の平均。
+
+### ベンチマーク結果 (100-Set Golden Set基準)
+| モデル | Recall@1 | Recall@5 | Recall@10 | MRR |
+| ----- | ----- | ----- | ----- | ----- |
+| OpenAI-v3 (small) | 0.22 | 0.50 | 0.65 | 0.354 |
+| Jina-v3 (1024 dim) | 0.17 | 0.47 | 0.63 | 0.319 |
+| BGE-M3 (Local) | 0.15 | 0.40 | 0.53 | 0.272 |
+
+OpenAI-v3(small)モデルが最も優れた性能を示しました。
+
+**Recall@10 :** 正解候補群を上位10位以内にうまく取り込むことができますが、 **Recall@1 :** 上位一位で正解を当てる割合は相対的に低い（22%）
+
+![img](/images/ALGO_RAG/rag_performance_analysis.png)
+
+---
+
+## こうやって終わったらよかったのですが...
+実際、この結果を見た後でも、何か怪しい感じがしました。
+自分が抽出したデータは3種類で[RAW, Preprocessed, Refined]ですが、これだけでいいのかという疑問がありました。
+
+そこで、私が行った全てのプロセスを分析することにし、以下の追加の実験を行いました。
+データの保存方法としては.jsonl形式を使いました。
+
+> **[1] 文字列統計:** 長さ、TTR（単語種類比）、ノイズ率、キーワード密度
+>
+> **[2] 埋め込み品質:** インタクラスタ/インタクラスタ距離、シルエットスコア
+>
+> **[3] t-SNE & UMAP**
+>
+> **[4] 言語間対応:** KR \<-> EN
+
+## [1] 文字列統計
+![text](/images/ALGO_RAG/stage1_text_statistics.png)
+
+HTMLノイズの違いが生じる理由は？
+
+LeetCodeはGraphQL APIを通じて直接抽出しており、以下のJSONL形式で表示されます。
+```jsonl
+{"id": "14", "title": "Longest Common Prefix", "titleSlug": "longest-common-prefix", "difficulty": "Easy", "content": "<p>文字列の配列から最長共通接頭辞を求める関数を作成してください。</p>\n\n<p>共通接頭辞がない場合は、空文字列<code>&quot;&quot;</code>を返します。</p>\n\n<p>&n"}
+```
+
+一方、AtCoderはsolved.ac APIを通じて抽出しているため、以下のJSONL形式で表示されます。
+```jsonl
+{"id": "9251", "title": "LCS", "difficulty": 11, "tags": ["dp", "string", "lcs"], "content": "最長共通部分列(LCS: Longest Common Subsequence)問題は、二つの数列が与えられたときに、両方の数列の部分列となる中で最も長いものを求める問題である。例えば、「ACAYKP」と「CAPCAK」のLCSは..."}
+```
+
+AtCoderにはHTMLタグがほとんど含まれていないため、ノイズ率が低いと考えられます。同じ前処理コードを適用しても、AtCoderのデータの方が少し高い評価になる現象が発生しているかもしれません。
+
+## [2] Embedding Quality
+Jina-v3とOpenAI-v3(small)モデルでそれぞれのファイルに対して埋め込みを作成しました。
+使用量はそれほど多くありませんでした。
+
+![使用状況](/images/ALGO_RAG/openai_usage.png)
+```jsonl
+BAEKJOON DATASETS:
+  Raw:         100 アイテム | フィールド: ['id', 'title', 'difficulty', 'tags', 'content', 'embedding', 'embedding_model', 'embedding_dim', 'embedding_jina', 'embedding_jina_model', 'embedding_jина_dim', 'embedding_openai', 'embedding_openai_model', 'embedding_openai_dim']
+  Preprocessed: 100 アイテム | フィールド: ['id', 'title', 'difficulty', 'tags', 'content', 'content_cleaned', 'embedding_text', 'embedding', 'embedding_model', 'embedding_dim', 'embedding_jina', 'embedding_jина_model', 'embedding_jина_dim', 'embedding_openai', 'embedding_openai_model', 'embedding_openai_dim']
+  Refined:      100 アイテム | フィールド: ['id', 'title', 'difficulty', 'tags', 'content', 'content_cleaned', 'embedding_text', 'embedding', 'embedding_model', 'embedding_dim', 'embedding_jina', 'embedding_jина_model', 'embedding_jина_dim', 'embedding_openai', 'embedding_openai_model', 'embedding_openai_dim']
+```
+
+```markdown
+LEETCODE DATASETS:
+  Raw:         100 個のアイテム | フィールド：['id', 'title', 'titleSlug', 'difficulty', 'content', 'tags', 'embedding', 'embedding_model', 'embedding_dim', 'embedding_jina', 'embedding_jina_model', 'embedding_jina_dim', 'embedding_openai', 'embedding_openai_model', 'embedding_openai_dim']
+  Preprocessed: 100 個のアイテム | フィールド：['id', 'title', 'titleSlug', 'difficulty', 'content', 'tags', 'content_cleaned', 'embedding_text', 'embedding', 'embedding_model', 'embedding_dim', 'embedding_jina', 'embedding_jina_model', 'embedding_jina_dim', 'embedding_openai', 'embedding_openai_model', 'embedding_openai_dim']
+  Refined:      100 個のアイテム | フィールド：['id', 'title', 'titleSlug', 'difficulty', 'content', 'tags', 'content_cleaned', 'embedding_text', 'embedding', 'embedding_model', 'embedding_dim', 'embedding_jina', 'embedding_jina_model', 'embedding_jina_dim', 'embedding_openai', 'embedding_openai_model', 'embedding_openai_dim']
+```
+
+### シルエットスコア
+K-meansなどのクラスタリングアルゴリズムを使用してデータをグルーピングした際、グループが適切に分類されているかどうかを確認する方法の一つです。
+
+これは[-1~1]の範囲の値を持ちます。私のプログラムでは、Baekjoon問題とLeetcode問題を正確にマッチさせることが目的であるため、$a(i) > b(i)$となるように、つまり、Baekjoon問題同士の距離($a$)が、Baekjoon問題とLeetcode問題間の距離($b$)よりも大きいことが望ましいです。そのため、負の値が出力される方が良いです。
+
+$$
+s(i) = \frac{b(i) - a(i)}{\max(a(i), b(i))}
+$$
+
+- $a(i)$ (クラスタ内距離): 自身が所属するクラスター内の他のデータとの平均距離です。
+- $b(i)$ (クラスタ間距離): 所属していない最も近いクラスターとの平均距離です。
+
+![silhouette](/images/ALGO_RAG/stage2_embedding_quality.png)
+
+#### 1. シルエットスコア
+
+RawからPreprocessedへ移行する際、最も大きな改善が見られました。一方でRefinedに進むとその傾向が逆転し、減少します。これは前処理の過程がエンベディング品質に最大の影響を与えたことを示しています。
+
+#### 2. クラスタ内距離 (クラスター内部の距離)
+クラスタ内のデータ同士がどれほど近いかを測定します。値が低いほど、同じカテゴリの問題がベクトル空間内で細かく集まり、密な配置ができていることを意味します。
+
+Baekjoon（青色）はRawからRefinedへと進むにつれて距離が急激に減少しています。これは前処理を経てBaekjoonの問題が相互一貫性のあるベクトル表現を持つようになったことを示しています。一方、LeetcodeではPreprocessedでピークを打ち、その後下降する傾向を見せています。
+
+#### 3. クラスタ間距離 (クラスタ間の距離)
+異なるクラスタ（백준グループ vs 리트코드 그룹）間の距離を測定します。値が大きいほど、2つのグループは明確に区別されていることを示しています。
+
+バックジョーンは段階が進むにつれて距離が逆に短くなり、これはバックジョーンデータがリトコードデータのベクトル領域に徐々に近づいていることを暗示しています。つまり、「意味的な距離」が2つのプラットフォーム間で縮まっていると解釈することができます。
+
+#### 4. クラスタ品質比 (クラスタ内/外比)
+(クラスタ内の距離 / クラスタ間の距離) の比率です。この値が低いほど、理想的な状態といえます。
+
+両データセットはともにPreprocessed段階で最低点（最も良い品質）を記録します。その後Refined段階でわずかに上昇するのは、過度な精製によって一部の特徴的なデータが希釈された可能性があることを示しています。
+
+#### 5. 距離分布 (ボックスプロット)
+バックジョーンデータの距離分布を視覚化したものです。中央値（ボックス内の線）とデータの広がり具合を見ることができます。
+
+クラスタ内：段階が進むにつれて、ボックスの高さは低くなり、位置は下に移動します。これはデータが極端な異常値（外れ値）を持たずに均等に密集していることを示しています。
+
+クラスタ間：外部との距離分布も安定化し、他のデータセットと比較可能な範囲内に入っています。
+
+#### 6. エンベディング品質ヒートマップ
+すべての指標を統合して視覚化した表です。緑色に近いほど、その指標で優れたパフォーマンスを示しています。
+
+**BJ Prep（バックジョーン前処理）**とLC Prep（リトコード前処理）列では緑色の割合が最も高くなっています。
+
+結果として、現在のデータセットでは「Preprocessed」状態でのエンベディングが検索効率が最も高いという統計的な結論を導くことができます。
+
+---
+この結果を見ると、Refinedステージで何か問題が発生したためにこのような状況になったのかを確認します。
+
+予想通り、前節でAIが強調し、好意的に扱ったBaekjoonデータセットの「embedding_text」に論理的構造体として埋め込みテキストを変更すると、むしろ害となり、Leetcodeデータとは異なりベクトル空間から遠ざかってしまったのではないかと推測されます。
+
+#### 解決策 : [アルゴリズム開発記 04](../algorithm_bot_04)
+
+## [3] t-SNE & UMAP
+
+### Baekjoon問題t-SNE可視化
+![tsne-baekjoon](/images/ALGO_RAG/stage3a_tsne_baekjoon.png)
+
+### Leetcode問題t-SNE可視化
+![tsne-leetcode](/images/ALGO_RAG/stage3b_tsne_leetcode.png)
+
+### 韓国語 → 英語の前処理過程
+![cross-lang](/images/ALGO_RAG/stage3c_cross_language_alignment.png)
+
+#### UMAP可視化（Refinedデータセット）
+![umap_refined](/images/ALGO_RAG/stage3c_umap_3d_refined.png)
+
+## [4] クロスリンガル・アラインメント
+![cross-lang-alignment](/images/ALGO_RAG/stage4_cross_lingual_alignment.png)
+
+## Jina v3とOpenAI text-embedding-3-smallの比較
+以上の前処理過程と分析に基づき、Jina v3とOpenAI text-embedding-3-smallモデルの性能差を比較しました。
+
+結果として、OpenAIモデルが全体的により良いパフォーマンスを見せたため、今後のアプリ開発においてOpenAIモデルを採用することに決定しました。
+
+![jina-vs-openai](/images/ALGO_RAG/model_comparison_jina_vs_openai.png)
+
+![jina-vs-openai-cross](/images/ALGO_RAG/cross_lingual_comparison_jina_vs_openai.png)
+
+## 結論と次のステップ
+
+今回のインジェクションモデル比較およびデータ前処理分析により、以下の結論を得ました。
+1. OpenAIのtext-embedding-3-smallモデルがJina v3よりも優れた性能を示しました。
+2. データ前処理プロセスがエンベディング品質に大きな影響を与えることがわかりました。
+3. Refinedステージでの過度な精査は、むしろパフォーマンスの低下を招く可能性があると確認されました。
+
+まず、refined段階で論理的骨格を削除し、2つのデータセットを均等に揃えてから、もう一度ベンチマークを実施してみようと思います。
+```
+[アルゴリズム種別] {アルゴリズム名}
+[問題要約] {コアロジックの説明}
+[複雑さ] 時間: {時間}, 空間: {空間}
+```

@@ -1,0 +1,97 @@
+---
+title: RAGの開発プロセスと結果アルゴリズム
+description: LangChain FAISSを利用した最終システム完成まで
+pubDate: '2026-01-13'
+heroImage: /images/ALGO_RAG/Algo-RAG-Arch.png
+tags:
+- algorithm
+- RAG
+- LangChain
+- automation
+category: algo_bot
+series: Algorithm Bot
+seriesOrder: 4
+---
+リンク: https://github.com/Hun-Bot2/Algorithm-RAG-Engine
+
+<u>*[前の記事](../algorithm_bot_03)*</u>から続く.
+
+## 精錬後の結果#
+
+##前の![stage1_text_statistics1 stage1](/images/ALGO_RAG/stage1_text_statistics.png) ###後の![stage1_text_statistics2 stage1_text_statistics2 stage2](/images/ALGO_RAG/stage1_text_statistics_ver2.png)
+
+---  ---
+
+##以前の![stage2_embedding_quality stage1](/images/ALGO_RAG/stage2_embedding_quality.png) ###後の![stage2_embedding_quality stage2](/images/ALGO_RAG/stage2_embedding_quality_ver2.png) 
+
+上記2つで顕著な変化があり,結果値は同じで,異なる結果値は,そのレポーで確認できます.
+
+さて,基本的に組み込みを学んだので,実際に3000個のLeetcode問題を組み込み,RAGシステムを構築してみます.
+
+---  ---
+
+#LangChain FAISSを活用したRAGシステムは,従来の計画であるPineconeを活用したRAGシステム構築から方向転換し,LangChainのFAISSを活用したRAGシステムを構築することにしました.
+
+なぜPineconeではなくLangChain FAISSを選んだのか ->Leetcodeの問題数は3000件しかありませんので,PineconeよりもLangChainのFAISSを使用することがより効率的だと考えました.
+
+さらに,個人Study Repoに付属していた Slack Botを分離してRAG Repoに統合しました.Mono Repoとして構築しようとしましたが,その後拡張性を考慮して,別々にRepoを作成して管理することにしました.
+
+前回の記事で説明した建築全体,私のGithub Repoで詳細な説明があるので,この記事では**なぜ?**を中心に説明し,私が経験した問題を解くつもりです.
+
+![algo-rag-final について](/images/ALGO_RAG/Algo-RAG-Arch.png)
+
+FAISSをどこで使ったのか? ->Leetcodeの問題を受け,埋め込みベクトルに変換し,FAISSインデックスに保存し,Github Repoにパッケージとしてアップロードしました.
+
+まず,私が収集した #Leetcode問題は約3000件 (無料問題のみ) であり,問題を保存した形式はjsonlファイルであった.当然のことですが, LLMがこの問題をすべてスクロールして類似した問題を検索することは非効率です. "検索"するには,ベクトリー化して保存するスペースが必要であり,ローカルベクトルDBを探しました.
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+**ChromaDB**:SQLiteをエンジンとして使用するオープンソースのベクトルストレージです.Pythonのネイティブ環境では使用が非常に簡単で,メタデータフィルタリング機能が強力です.
+
+**LanceDB**:Apache Arrowフォーマットに基づいて",Serverless"を向いている.ディスクIOの効率は極めて高いため,データが大きくなっても性能が低い.
+
+**FAISS** (Facebook AI類似性検索): メタはFacebookで開発された高性能類似性検索ライブラリです. DBRAよりもアルゴリズムライブラリに近いため,メモリ内の検索速度は圧倒的です.
+
+1.Langchainを勉強中に使ってみたかったので使いました. (ブログ3ページ参照してください.) 2.Github Actionsに適したベクトルDBが必要になり,FAISSは単純なライブラリ形式でのインデックスファイルのみを管理できていたので, 3.構築された問題は,追加頻度が低い時に構築された場合,Reedmanを模擬的に使っているため,高速 FAISSを選択しました.
+
+問題:GitHub Actions自身にはファイル保存機能があるが,なぜAWS S3を使用したのでしょうか?
+
+1. **データ継続性:** GitHub Artifacts は一定の期間後削除されますが,S3 は永久保存可能です. 2. **作業間解明:**Heavy Job と Light Job の実行環境を物理的に隔離し,システム柔軟性を確保しました. S3 を中間媒体として利用し,データ転送と受信プロセスの結合を低減させることで,各作業が相互に依存せず,独立した実行可能な構造が必要でした. 3. **外向拡張性:**後にスラック以外のWeb大板などを作るとき,S3 のデータを直接APIに呼び出す拡張性を考慮しました.
+
+##重労働・軽労働の解消 - **Heavy Job:** Leetcode問題を収集し,埋め込みベクトルを作成した後, FAISS インデックスを構築します.この作業は時間がかかるし,頻繁に実行されません. - **Light Job:** FAISS インデックスを呼び出し,類似した問題を検索し,類似した問題と llmで生成した理由をスラックに転送します.この作業は頻繁に実行され,迅速な対応が必要です.
+
+変更アルゴリズムを解き放つと,コミットする際には,各回復習周期に通知が届きます. - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+そして,下記のような形に変更しました.
+
+1. **Trigger:** 私が今日や昨日) の問題を解き,コミットしたときにしか効かない.
+
+2. **Action:**: "このバクツィーン問題について,私が今お話しした"と最も似たLeetCode問題をお勧めします.
+
+3. **目標:** 学習した概念を別のプラットフォーム (LeetCode) の問題に応用して体現する目標変更.
+
+## gitpythonが導入され,Repoの最新のコンクリートのみを持ち出すことが可能になりました.この構造では,すべてのファイルを持ち出すたびに,有効ではなく,最新のコンクリートから変更されたファイルのみを持ち出すことが可能になりました.
+
+``python def get_latest_changed_files(repo_path: str, target_subdir: str) -> List[str]: """ ターゲットサブディレクトリ内の最新のコミット (HEAD) で変更されたファイルを検知します. """ print(f"[INFO] 目標サブディレクトリ内の git 歴史をチェックします. """ print(f. ") changed_files = [] try: repo = Repo(repo_path) # Repo_path を確認してください.
+
+[INFO] First commit detected. Scanning all files. ") for item in head_commit.tree.traverse: if item.path.startswith(target_subdir) and item.path.endswith((.md", ".mdx"): full_path = os.path.joinrepo_path, item.path) changed_files.append(full_path) else: # Compare HEAD with HEAD~1 (Previous commit) = head_commit.tarents[0] diffs = parent.diff_head_commit) for in returns: We only get diff diff differs about (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+
+return_files が変更されました.
+
+#Leetcodeの問題はPythonに追加されているので,複製を防止します. ```python # Search search_limit = MAX_RECOMMENDATIONS + 2 # Buffer to avoid self-match docs_and_scores = vectorstore.similarity_search_with_score(user_prob["query_text"], k=search_limit recs = []
+
+Duplicates & # Self-Match seen_title= set() user_title_clean=re.sub(r'[^a-zA-Z0-9가-]', '', user_prob["title"].lower()) 
+
+for doc, score in docs_and_scores: if len(recs) >= MAX_RECOMMENDATIONS: break
+
+rec_title=doc.metadata.get("title", "Unknown") rec_title_clean=re.sub(r'[^a-zA-Z0-9가-]', '', rec_title.lower()) 
+
+if user_title_clean in rec_title_clean or rec_title_clean in user_title_clean: Continue # Skip self-match if rec_title_clean in seen_title: continue # Skip duplicates
+
+タイトル.add(see_rec_title_clean) ... ```
+
+##アラーム(実際の応答) ![スラックボット](/images/ALGO_RAG/slack-bot-message.png)
+
+このプロジェクトではベクトル検索技術とRAGシステムの実用的な応用方法を理解することができました.ここで追加する部分は,以下の1\~4点くらいでしょう. 1.初期環境変数を設定せずに使用できるようにするために? 2) 他の人が利用できるようにするために, 2. 構築されたレートコード問題を木として視覚化して成長する -> 問題を解決すると木が成長し,ポイント問題は明るい葉状の形 (((?),複雑さによって異なる色で表現する 4. グラフネットワークの視覚化
+
+これからも,私が使っている中で,システムを継続的に改善し,さらに多くの問題を追加し,アルゴリズム学習に役立つツールとして開発していきます.ありがとうございました!

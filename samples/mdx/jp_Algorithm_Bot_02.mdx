@@ -1,0 +1,71 @@
+---
+title: アルゴリズム学習自動化+:RAGベースの類似問題推薦システム
+description: シンプルな復習を超えて,記憶に残るAIベースの学習自動化設計です.
+pubDate: '2025-12-30'
+heroImage: /images/ALGO_RAG/algo-RAG.svg
+tags:
+- algorithm
+- RAG
+- LLM
+- automation
+category: algo_bot
+series: Algorithm Bot
+seriesOrder: 2
+---
+## なぜ作ろうとしているのか?
+
+しかし,長期記憶を保ち,アルゴリズムの効率性を高めるために,解決されたタイプの問題について,変数式問題解決法や,解決されたタイプの問題解決法のような問題解決法が必要だと考えるとき,私は AIに復習する問題を投げ出し,類似の問題を"これのような問題を探す"という方法で解決し,この部分を自動化しようとしています.
+
+1週間の課題を解決し,勉強した後,現在私が直面している問題は以下の通りです.
+
+バクジーン (Baekjoon) の問題を解決すると,同様の論理を持つ外国サイト (LeetCode, Codeforces) の問題を探すために再びAIに尋ね,検索する必要があります.
+
+**検索ノイズ**: 問題のタイトルや内容が似ているからといって,同じアルゴリズムを要求する必要はありません.もちろん,検索方法は異なっていますが,ある内容を複製するには,できるだけ似た内容を探さなければなりません.
+
+---  ---
+
+##アルゴリズムの問題を探す#
+
+アルゴリズムの問題では,私がマッチする必要があるデータは以下の通りです.
+
+**不必要な部分 (ストーリー) **:問題に埋め込まれたストーリー (例えば,取り消しの謝罪詐欺) です. これは検索時に削除すべき騒音です. * **アルゴリズム形式,タグ**:問題の核心となるデータ構造とアルゴリズム論理 (例えば,二次元配列のプレフィックスサム). * **薬条件**:時間の複雑さとメモリ制限.
+
+---  ---
+
+どんな技術が必要なのか:RAGベースのアーキテクチャ
+
+ただのキーワードマッチングではなく,意味的な類似性を判断するために,Retrieval-Augmented Generation (RAG) システムを構築しようとしています.RAGを活用するプロジェクトを試みましたが,素晴らしい機会がありました^^
+
+先ずは,以下の流れで開発が進められる予定です.
+
+### 1.知識データベース (Vector Database)
+
+LeetCodeと Codeforcesの問題データセットを集めてベクトルデータベース (Pineconeまたは ChromaDB) に保存します.この場合,問題文本全体ではなく,LLMは先程の **アルゴリズム概要**を埋め込み,検索精度を高めます.
+
+3段階のパイプラインです.
+
+適切なマッチングのために次の手順を行います.
+
+**メタデータフィルタリング**: バクジュンの難易度 (ゴールド/シルバーなど) とタグに基づいて候補者を1度フィルタリングします.
+
+**Semantic Search**: OpenAIの `text-embedding-3-small`モデルを使って,問題構造の類似性を計算する.
+
+**LLM Re-Ranking**:トップ5の候補者をGPT-4o-miniに転送し,制限事項まで一致する最適な1位問題を最終的に選択します.
+
+---  ---
+
+##コスト・効率分析 (GPTの作成)
+
+このシステムは個人ブログのインフラストラクチャ (GitHub Actions) 内で動作しているため,維持費はほとんど発生しないと予想されているが,戻すべきかと思いますか? 最近,Github Actions に関する何かがあったので,もしGitHub Actions を使用できなければ,Jenkins に代わってしまいたいと思います.
+
+ポイントは,技術の使用コスト (30 件目) について,Pinecone Starter Plan について,Pinecone Starter Plan について,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter Plan,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone Starter,Pinecone,Pinecone Starter,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,Pine,
+
+---  ---
+
+## 将来の計画
+
+単に"復習する時間だ"と通知を受ける段階を超えて",昨日のバクジュン問題と同様のリートコードメディウム問題をお勧めします"というメッセージを受け取る環境を目指しています.
+
+この自動化が完了すると,私はもはや問題を見つけるために問題リンクをコピーしてAIに投げかける必要はありません.
+
+システム構築が完了するにつれて,具体的なベクトルDBアップロードスクリプトとプロンプトエンジニアリングプロセスを共有します.
