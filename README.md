@@ -30,7 +30,8 @@ Current workflow:
 - Local inference: Ollama
 - Cloud inference: RunPod worker
 - Storage: PostgreSQL + pgvector
-- Ops frontend: Firebase Hosting static web app
+- Controller API: FastAPI with Server-Sent Events for run progress
+- Ops frontend: SvelteKit dashboard, deployable as static output to Firebase Hosting
 - Observability target: Grafana Cloud
 
 Architecture docs:
@@ -41,44 +42,113 @@ Architecture docs:
 
 ## Main Files
 
-- [translate.py](/Users/jeonghun/local-llm-observability/translate.py)
-  Main CLI pipeline for translation with DB/cache integration.
+- [scripts/scan_posts.py](/Users/jeonghun/local-llm-observability/scripts/scan_posts.py)
+  V2 scanner for missing/stale translated MDX files.
 
-- [testing/local_translate.py](/Users/jeonghun/local-llm-observability/testing/local_translate.py)
+- [scripts/translate_changed.py](/Users/jeonghun/local-llm-observability/scripts/translate_changed.py)
+  V2 incremental runner. It scans first and only translates files that need work.
+
+- [local_llm_observability/translator.py](/Users/jeonghun/local-llm-observability/local_llm_observability/translator.py)
+  Main translation pipeline with DB/cache/trace integration.
+
+- [tests/local_translate.py](/Users/jeonghun/local-llm-observability/tests/local_translate.py)
   Local-only model comparison script without DB/RunPod dependencies.
 
 - [runpod/worker.py](/Users/jeonghun/local-llm-observability/runpod/worker.py)
   RunPod worker API exposing `/health`, `/translate`, and `/embed`.
 
-- [src/mdx_parser.py](/Users/jeonghun/local-llm-observability/src/mdx_parser.py)
+- [local_llm_observability/mdx_parser.py](/Users/jeonghun/local-llm-observability/local_llm_observability/mdx_parser.py)
   MDX parser and section splitter.
 
-- [src/cache_manager.py](/Users/jeonghun/local-llm-observability/src/cache_manager.py)
+- [local_llm_observability/cache_manager.py](/Users/jeonghun/local-llm-observability/local_llm_observability/cache_manager.py)
   Cache diffing and cache write-back.
 
-- [src/quality_scorer.py](/Users/jeonghun/local-llm-observability/src/quality_scorer.py)
+- [local_llm_observability/quality_scorer.py](/Users/jeonghun/local-llm-observability/local_llm_observability/quality_scorer.py)
   Structure / glossary / length / hallucination scoring.
 
-- [src/db/db_manager.py](/Users/jeonghun/local-llm-observability/src/db/db_manager.py)
+- [local_llm_observability/db/db_manager.py](/Users/jeonghun/local-llm-observability/local_llm_observability/db/db_manager.py)
   PostgreSQL access layer.
 
-- [frontend/index.html](/Users/jeonghun/local-llm-observability/frontend/index.html)
-  Static Firebase-hosted operations dashboard shell.
+- [local_llm_observability/api/main.py](/Users/jeonghun/local-llm-observability/local_llm_observability/api/main.py)
+  Local FastAPI controller for posts, file details, translation runs, and event streaming.
+
+- [frontend/src/routes/+page.svelte](/Users/jeonghun/local-llm-observability/frontend/src/routes/+page.svelte)
+  Real-time SvelteKit operations dashboard.
 
 ## Repo Layout
 
 ```text
 local-llm-observability/
-├── frontend/         # Firebase Hosting static dashboard
+├── local_llm_observability/ # Python application package
+│   ├── api/          # FastAPI controller API
+│   └── db/           # PostgreSQL access layer
+├── scripts/          # CLI entrypoints for scanning and incremental runs
+├── tests/            # Unit tests and local-only model comparison script
+├── samples/          # Local MDX fixtures and generated sample outputs
+├── frontend/         # SvelteKit real-time dashboard
 ├── runpod/           # Docker image + worker for GPU inference
-├── src/              # Parser, cache, DB, quality, sample MDX files
-├── testing/          # Local-only translation test scripts
 ├── database/         # PostgreSQL schema
 ├── docs/             # Architecture diagrams
-├── translate.py      # Main translation CLI
+├── scan_posts.py     # Compatibility wrapper for scripts/scan_posts.py
+├── translate_changed.py # Compatibility wrapper for scripts/translate_changed.py
+├── translate.py      # Compatibility wrapper for local_llm_observability.translator
 ├── v1.md             # V1 architecture
 ├── v1+v2.md          # V1/V2 roadmap
+├── new-arch.md       # Research-driven architecture and development order
 └── memory.md         # Project state memory
+```
+
+## Useful Commands
+
+Start local controller:
+
+```bash
+./venv/bin/uvicorn controller.main:app --reload --port 8000
+```
+
+Start frontend dashboard:
+
+```bash
+npm --prefix frontend install
+npm --prefix frontend run dev
+```
+
+Run deterministic tests:
+
+```bash
+./venv/bin/python tests/run_tests.py
+```
+
+Scan local source posts without translating:
+
+```bash
+./venv/bin/python scripts/scan_posts.py --source-dir samples/mdx
+```
+
+Run V2 in dry-run mode for English only:
+
+```bash
+./venv/bin/python scripts/translate_changed.py --source-dir samples/mdx --langs en
+```
+
+Run V2 for real with local Ollama:
+
+```bash
+./venv/bin/python scripts/translate_changed.py --langs en --local --only After_interview --limit 1 --execute
+```
+
+Run V2 for real with RunPod:
+
+```bash
+./venv/bin/python scripts/translate_changed.py --source-dir samples/mdx --langs en jp --runpod-url https://YOUR-POD-8000.proxy.runpod.net --execute
+```
+
+For production use, replace `samples/mdx` with the real Korean blog source path.
+
+Model testing command:
+
+```bash
+./venv/bin/python scripts/translate_changed.py --langs en --local --en-model gemma4:latest --only After_interview --limit 1 --execute
 ```
 
 ## Roadmap
@@ -97,3 +167,12 @@ local-llm-observability/
 - run translation automatically
 - score quality automatically
 - notify results automatically
+
+Current V2 foundation:
+
+- deterministic scanner exists
+- incremental dry-run exists
+- real execution is available behind `--execute`
+- local FastAPI controller exists
+- real-time SvelteKit dashboard exists
+- progress events are recorded in PostgreSQL `run_events`
