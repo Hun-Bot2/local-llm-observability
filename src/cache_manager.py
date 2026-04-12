@@ -35,7 +35,12 @@ class CacheManager:
 
             if cached and cached["content_hash"] == section["hash"]:
                 # Hash matches — check if translations exist
-                if cached.get("en_text") and cached.get("jp_text"):
+                if (
+                    cached.get("en_text")
+                    and cached.get("jp_text")
+                    and self._valid_cached_translation(section, cached.get("en_text"))
+                    and self._valid_cached_translation(section, cached.get("jp_text"))
+                ):
                     hits.append({**section, "en_text": cached["en_text"], "jp_text": cached["jp_text"]})
                 else:
                     # Hash matches but missing translation(s)
@@ -77,3 +82,16 @@ class CacheManager:
         parsed = parse_mdx(filepath)
         self.db.upsert_blog_post(parsed["filename"], parsed["frontmatter"])
         return parsed["filename"]
+
+    def _valid_cached_translation(self, section: dict, translated_text: str | None) -> bool:
+        if not translated_text:
+            return False
+        if section["type"] != "code":
+            return True
+        source = section["text"].strip()
+        translated = translated_text.strip()
+        if source.startswith("```") and not translated.startswith("```"):
+            return False
+        if source.endswith("```") and not translated.endswith("```"):
+            return False
+        return True
