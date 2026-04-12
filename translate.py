@@ -275,6 +275,19 @@ class Translator:
                 latency_ms=payload.get("latency_ms", 0),
             )
 
+        input_tokens = sum(payload.get("input_tokens", 0) or 0 for payload in translated)
+        output_tokens = sum(payload.get("output_tokens", 0) or 0 for payload in translated)
+        self._emit(
+            "tokens_recorded",
+            f"Recorded {input_tokens + output_tokens} token(s)",
+            {
+                "lang": lang,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            },
+        )
+
         return translated
 
     def _translate_via_worker(self, sections: list[dict[str, Any]], lang: str, glossary_text: str):
@@ -331,9 +344,11 @@ class Translator:
             )
         elif section_type == "code":
             system_prompt += (
-                "\n\nIMPORTANT: The input is a fenced code block. Preserve the code, indentation, fences, "
-                "identifiers, URLs, and string syntax exactly. Translate only human-language comments and "
-                "docstrings into the target language. Do not add explanations."
+                "\n\nIMPORTANT: The input is a fenced code block. You MUST preserve the opening and closing "
+                "triple-backtick fences exactly. Keep the language marker after the opening fence exactly, "
+                "for example ```yaml or ```python. Preserve indentation, identifiers, URLs, commands, and string "
+                "syntax exactly. Translate only human-language comments and docstrings into the target language. "
+                "Do not add explanations before or after the fenced code block."
             )
 
         started_at = time.perf_counter()
@@ -373,7 +388,7 @@ class Translator:
         finally:
             self._release_local_model(model)
 
-        translated = translated_text.replace("```json", "").replace("```", "").strip()
+        translated = self._normalize_translated_section(text, translated_text, section_type)
         return {
             "index": index,
             "filename": filename,
@@ -395,6 +410,40 @@ class Translator:
             )
         except requests.RequestException:
             pass
+
+    def _normalize_translated_section(self, source_text: str, translated_text: str, section_type: str) -> str:
+        translated = self._strip_outer_json_fence(translated_text.strip())
+        if section_type == "code":
+            return self._restore_code_fence(source_text, translated)
+        return translated
+
+    def _strip_outer_json_fence(self, text: str) -> str:
+        match = re.fullmatch(r"```(?:json)?\s*\n([\s\S]*?)\n```", text.strip(), re.IGNORECASE)
+        if match:
+            inner = match.group(1).strip()
+            if not inner.startswith("{") and not inner.startswith("["):
+                return text.strip()
+            return inner
+        return text.strip()
+
+    def _restore_code_fence(self, source_text: str, translated_text: str) -> str:
+        source_match = re.match(r"^(```[^\n]*)(?:\n([\s\S]*?)\n)?```$", source_text.strip())
+        if not source_match:
+            return translated_text.strip()
+
+        opening_fence = source_match.group(1)
+        translated = translated_text.strip()
+        if translated.startswith("```") and translated.endswith("```"):
+            lines = translated.splitlines()
+            if lines:
+                lines[0] = opening_fence
+            return "\n".join(lines).strip()
+
+        lines = translated.splitlines()
+        if lines and lines[0].strip().lower() == opening_fence[3:].strip().lower():
+            translated = "\n".join(lines[1:]).strip()
+
+        return f"{opening_fence}\n{translated}\n```"
 
     def _glossary_text_for(self, lang: str, text: str) -> str:
         glossary = self.db.get_glossary(lang)
