@@ -5,6 +5,8 @@ __pycache__/
 *.egg
 dist/
 build/
+.mypy_cache/
+.ruff_cache/
 
 # Virtual environment
 venv/
@@ -22,18 +24,60 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+coverage.xml
+.tox/
 
-# Backup & data
+# Local backups and exported data
 data/backup/
 glossary_backup.sql
+*.bak
+*.backup
+*.dump
+*.sql.gz
+exports/
 
 # Docker volumes (local)
 postgres_data/
 grafana_data/
+.postgres/
+.grafana/
 
 # Firebase
 .firebase/
+.firebase-debug.log
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
+frontend/.vite/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Firebase agents
+.agents/
+
+# Claude
+.claude/
+
+# Runtime and generated artifacts
+*.log
+*.tmp
+*.sqlite
+*.sqlite3
+
+# Local translation outputs generated next to source files.
+# Keep curated fixtures under samples/mdx trackable.
+*_en.mdx
+*_jp.mdx
+*_en_*.mdx
+*_jp_*.mdx
+!samples/mdx/**/*.mdx
