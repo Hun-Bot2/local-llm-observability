@@ -13,10 +13,11 @@ import argparse
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
+from src.blog_scanner import SOURCE_LANG_DIR
 from src.cache_manager import CacheManager
 from src.db.db_manager import DBManager
 from src.mdx_parser import FRONTMATTER_RE, parse_mdx
@@ -27,7 +28,7 @@ OLLAMA_LOCAL_URL = "http://localhost:11434"
 RUNPOD_HOURLY_RATE = 0.39
 
 MODELS = {
-    "en": "translategemma:12b",
+    "en": "gemma4:latest",
     "jp": "qwen3:14b",
 }
 
@@ -53,14 +54,26 @@ Translate the Korean text into natural, professional English for a developer aud
 
 
 class Translator:
-    def __init__(self, service_url: str = OLLAMA_LOCAL_URL, use_worker: bool = False):
+    def __init__(
+        self,
+        service_url: str = OLLAMA_LOCAL_URL,
+        use_worker: bool = False,
+        output_dirs: dict[str, str] | None = None,
+        source_root: str | None = None,
+        model_overrides: dict[str, str] | None = None,
+        event_callback: Callable[[str, str, dict[str, Any] | None], None] | None = None,
+    ):
         self.service_url = service_url.rstrip("/")
         self.use_worker = use_worker
+        self.output_dirs = {lang: Path(path).expanduser().resolve() for lang, path in (output_dirs or {}).items()}
+        self.source_root = Path(source_root).expanduser().resolve() if source_root else None
+        self.models = {**MODELS, **(model_overrides or {})}
+        self.event_callback = event_callback
         self.db = DBManager()
         self.cache = CacheManager(self.db)
         self.scorer = QualityScorer(self.db)
 
-    def translate_file(self, filepath: str, langs: list[str] | None = None):
+    def translate_file(self, filepath: str, langs: list[str] | None = None, run_id: int | None = None):
         """Full translation pipeline for a single MDX file."""
         langs = langs or ["en", "jp"]
         path = Path(filepath)
@@ -75,17 +88,25 @@ class Translator:
         print(f"Backend: {mode} ({self.service_url})")
         print(f"{'=' * 60}")
 
+        self._emit("started", f"Started translation for {path.name}", {"file": str(path), "langs": langs})
         self.cache.sync_blog_post(filepath)
-        run_id = self.db.insert_pipeline_run("manual")
+        run_id = run_id or self.db.insert_pipeline_run("manual")
         start_time = time.time()
 
         try:
+            self._emit("parsing", "Parsing MDX and checking cache", {"file": str(path)})
             diff = self.cache.diff(filepath)
             diff["source_path"] = str(path)
             print(f"\nSections: {diff['total']} total, {diff['cached']} cached, {diff['new']} to translate")
+            self._emit(
+                "cache_checked",
+                f"Cache checked: {diff['cached']} cached, {diff['new']} new",
+                {"total": diff["total"], "cached": diff["cached"], "new": diff["new"]},
+            )
 
             for lang in langs:
                 print(f"\n--- {lang.upper()} Translation ---")
+                self._emit("language_started", f"Starting {lang.upper()} translation", {"lang": lang})
                 self._translate_lang(diff, lang, run_id)
 
             gpu_time = time.time() - start_time
@@ -103,9 +124,15 @@ class Translator:
             print(f"\n{'=' * 60}")
             print(f"Done in {gpu_time:.1f}s | Cache hits: {diff['cached']}/{diff['total']} | Cost: ${cost:.4f}")
             print(f"{'=' * 60}")
+            self._emit(
+                "completed",
+                f"Completed in {gpu_time:.1f}s",
+                {"gpu_time_sec": round(gpu_time, 2), "estimated_cost": round(cost, 6)},
+            )
         except Exception as exc:
             self.db.update_pipeline_run(run_id=run_id, status="failed")
             print(f"\nPipeline failed: {exc}")
+            self._emit("failed", str(exc), {"error": exc.__class__.__name__})
             raise
         finally:
             self.db.close()
@@ -152,7 +179,7 @@ class Translator:
                     "hash": section["hash"],
                     "text": section["text"],
                 },
-                model_name=translated_map.get(section["index"], {}).get("model", MODELS.get(lang)),
+                model_name=translated_map.get(section["index"], {}).get("model", self.models.get(lang)),
                 **{lang_key: translated},
             )
 
@@ -162,6 +189,7 @@ class Translator:
         ko_sections = source_parsed["sections"]
         tr_sections = [{"type": section["type"], "text": section["text"]} for section in all_sections]
         scores = self.scorer.score_file(ko_sections, tr_sections, lang, filename, run_id)
+        self._emit("quality_scored", f"Quality scored for {lang.upper()}", {"lang": lang, "sections": len(scores)})
 
         failed = [section for section, score in zip(all_sections, scores) if not score.passed]
         if failed:
@@ -188,10 +216,20 @@ class Translator:
 
         char_count = sum(len(section["ko_text"]) for section in sections_to_translate)
         print(
-            f"  [{MODELS[lang]}] Translating {len(sections_to_translate)} section(s) "
+            f"  [{self.models[lang]}] Translating {len(sections_to_translate)} section(s) "
             f"({char_count} chars total)...",
             end=" ",
             flush=True,
+        )
+        self._emit(
+            "model_started",
+            f"Sending {len(sections_to_translate)} section(s) to {self.models[lang]}",
+            {
+                "lang": lang,
+                "model": self.models[lang],
+                "sections": len(sections_to_translate),
+                "characters": char_count,
+            },
         )
         started_at = time.time()
         glossary_text = self._glossary_text_for(
@@ -216,6 +254,11 @@ class Translator:
 
         elapsed = time.time() - started_at
         print(f"done ({elapsed:.1f}s)")
+        self._emit(
+            "model_completed",
+            f"Model returned {len(translated)} section(s)",
+            {"lang": lang, "elapsed_sec": round(elapsed, 2), "sections": len(translated)},
+        )
 
         for payload in translated:
             self.db.insert_translation_section(
@@ -224,7 +267,7 @@ class Translator:
                 section_index=payload.get("index"),
                 section_type=payload.get("section_type", "paragraph"),
                 target_lang=lang,
-                model_name=payload.get("model", MODELS[lang]),
+                model_name=payload.get("model", self.models[lang]),
                 source_text=payload["ko_text"],
                 translated_text=payload["translated"],
                 input_tokens=payload.get("input_tokens", 0),
@@ -253,7 +296,7 @@ class Translator:
 
     def _translate_direct(self, text: str, lang: str, section_type: str, index: int | None,
                           filename: str | None, glossary_text: str = "") -> dict[str, Any]:
-        model = MODELS[lang]
+        model = self.models[lang]
         system_prompt = SYSTEM_PROMPTS[lang]
         if glossary_text:
             system_prompt += f"\n\n[Glossary — use these exact translations]\n{glossary_text}"
@@ -272,6 +315,12 @@ class Translator:
         elif section_type == "frontmatter_description":
             system_prompt += (
                 "\n\nIMPORTANT: This is a frontmatter description value. DO NOT change the frontmatter structure. "
+                "Translate only this single value. Do not expand, summarize, add headings, bullet points, extra lines, "
+                "or surrounding keys. Output exactly one line."
+            )
+        elif section_type == "frontmatter_series":
+            system_prompt += (
+                "\n\nIMPORTANT: This is a frontmatter series value. DO NOT change the frontmatter structure. "
                 "Translate only this single value. Do not expand, summarize, add headings, bullet points, extra lines, "
                 "or surrounding keys. Output exactly one line."
             )
@@ -301,7 +350,7 @@ class Translator:
                 },
                 timeout=300,
             )
-            if response.status_code == 404:
+            if response.status_code == 404 or response.status_code >= 500:
                 response = requests.post(
                     f"{self.service_url}/api/generate",
                     json={
@@ -385,7 +434,7 @@ class Translator:
             section_index=None,
             section_type=section_type,
             target_lang=lang,
-            model_name=translated.get("model", MODELS[lang]),
+            model_name=translated.get("model", self.models[lang]),
             source_text=text,
             translated_text=translated["translated"],
             input_tokens=translated.get("input_tokens", 0),
@@ -409,9 +458,24 @@ class Translator:
         else:
             output = f"{body}\n"
 
-        output_path = source_path.with_name(source_path.stem + f"_{lang}.mdx")
+        output_path = self._output_path(source_path, lang)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(output, encoding="utf-8")
         print(f"  Saved: {output_path}")
+        self._emit("saved", f"Saved {lang.upper()} output", {"lang": lang, "path": str(output_path)})
+
+    def _output_path(self, source_path: Path, lang: str) -> Path:
+        output_dir = self.output_dirs.get(lang)
+        if not output_dir:
+            return source_path.with_name(source_path.stem + f"_{lang}.mdx")
+
+        if not self.source_root:
+            return output_dir / source_path.name
+
+        relative_path = source_path.resolve().relative_to(self.source_root.resolve())
+        if len(relative_path.parts) > 1 and relative_path.parts[0] == SOURCE_LANG_DIR:
+            relative_path = Path(*relative_path.parts[1:])
+        return output_dir / relative_path
 
     def _translate_frontmatter(self, raw_fm: str, lang: str, filename: str, run_id: int) -> str:
         lines = raw_fm.split("\n")
@@ -447,6 +511,10 @@ class Translator:
 
     def _estimate_cost(self, gpu_time_sec: float) -> float:
         return (gpu_time_sec / 3600) * RUNPOD_HOURLY_RATE
+
+    def _emit(self, event_type: str, message: str, details: dict[str, Any] | None = None):
+        if self.event_callback:
+            self.event_callback(event_type, message, details or {})
 
 
 def main():
