@@ -1,0 +1,170 @@
+{
+  "id": null,
+  "uid": "translation-pipeline",
+  "title": "Translation Pipeline",
+  "tags": ["translation", "llm"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Quality Score Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT created_at AS time, composite_score AS \"EN Quality\" FROM translation_quality WHERE target_lang = 'en' ORDER BY created_at",
+          "format": "time_series",
+          "refId": "A"
+        },
+        {
+          "rawSql": "SELECT created_at AS time, composite_score AS \"JP Quality\" FROM translation_quality WHERE target_lang = 'jp' ORDER BY created_at",
+          "format": "time_series",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.7 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Cache Hit Rate Trend",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT started_at AS time, CASE WHEN (cached_sections + new_sections) > 0 THEN cached_sections::float / (cached_sections + new_sections) ELSE 0 END AS \"Cache Hit Rate\" FROM pipeline_runs WHERE status = 'completed' ORDER BY started_at",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Monthly Cost",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('month', started_at) AS time, SUM(estimated_cost) AS \"Cost ($)\" FROM pipeline_runs WHERE status = 'completed' GROUP BY date_trunc('month', started_at) ORDER BY time",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Recent Pipeline Runs",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT id AS \"Run\", status AS \"Status\", total_files AS \"Files\", cached_sections AS \"Cached\", new_sections AS \"New\", ROUND(gpu_time_sec::numeric, 1) AS \"GPU Time (s)\", ROUND(estimated_cost::numeric, 4) AS \"Cost ($)\", started_at AS \"Started\" FROM pipeline_runs ORDER BY started_at DESC LIMIT 20",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Quality Breakdown (Latest)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT filename AS \"File\", target_lang AS \"Lang\", ROUND(structural_score::numeric, 3) AS \"Structural\", ROUND(length_score::numeric, 3) AS \"Length\", ROUND(semantic_score::numeric, 3) AS \"Anti-Hallucination\", ROUND(glossary_score::numeric, 3) AS \"Glossary\", ROUND(composite_score::numeric, 3) AS \"Composite\", passed AS \"Passed\", created_at AS \"Time\" FROM translation_quality ORDER BY created_at DESC LIMIT 20",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Weekly Reports",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT week_start AS \"Week\", posts_translated AS \"Posts\", total_sections AS \"Sections\", ROUND((cache_hit_rate * 100)::numeric, 1) AS \"Cache %\", ROUND(avg_quality_en::numeric, 3) AS \"EN Quality\", ROUND(avg_quality_jp::numeric, 3) AS \"JP Quality\", ROUND(total_gpu_time_sec::numeric, 1) AS \"GPU Time (s)\", ROUND(total_cost::numeric, 4) AS \"Cost ($)\" FROM weekly_reports ORDER BY week_start DESC LIMIT 12",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "Low Quality Alerts",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "PCC52D03280B7034C" },
+      "targets": [
+        {
+          "rawSql": "SELECT filename AS \"File\", target_lang AS \"Lang\", ROUND(composite_score::numeric, 3) AS \"Score\", ROUND(structural_score::numeric, 3) AS \"Structural\", ROUND(glossary_score::numeric, 3) AS \"Glossary\", created_at AS \"Time\" FROM translation_quality WHERE passed = false ORDER BY created_at DESC LIMIT 10",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "schemaVersion": 39
+}
