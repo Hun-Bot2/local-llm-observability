@@ -1,3 +1,7 @@
 ollama
 psycopg2-binary
 python-dotenv
+pyyaml
+requests
+fastapi
+uvicorn

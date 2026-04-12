@@ -121,6 +121,40 @@ CREATE INDEX idx_translation_sections_file ON translation_sections(filename);
 CREATE INDEX idx_translation_sections_lang ON translation_sections(target_lang);
 
 -- =============================================
+-- LLM Calls — forensic trace of every model attempt
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id SERIAL PRIMARY KEY,
+    run_id INT,
+    filename TEXT,
+    section_index INT,
+    section_type TEXT,
+    target_lang VARCHAR(10),
+    backend TEXT,
+    endpoint TEXT,
+    model_name TEXT,
+    system_prompt TEXT,
+    user_prompt TEXT,
+    glossary_text TEXT,
+    raw_response JSONB,
+    raw_output TEXT,
+    normalized_output TEXT,
+    validation_passed BOOLEAN DEFAULT FALSE,
+    validation_errors JSONB DEFAULT '[]',
+    input_tokens INT DEFAULT 0,
+    output_tokens INT DEFAULT 0,
+    latency_ms FLOAT DEFAULT 0,
+    total_duration_ns BIGINT,
+    prompt_eval_duration_ns BIGINT,
+    eval_duration_ns BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_llm_calls_run ON llm_calls(run_id, created_at);
+CREATE INDEX idx_llm_calls_validation ON llm_calls(validation_passed, target_lang);
+
+-- =============================================
 -- Pipeline Runs — execution tracking
 -- =============================================
 
@@ -138,6 +172,80 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 );
 
 CREATE INDEX idx_pipeline_status ON pipeline_runs(status);
+
+-- =============================================
+-- Run Events — real-time dashboard timeline
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS run_events (
+    id SERIAL PRIMARY KEY,
+    run_id INT NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    message TEXT NOT NULL,
+    details JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_run_events_run ON run_events(run_id, created_at);
+
+-- =============================================
+-- Human-Owned Quality Policy
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS translation_rubrics (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    target_lang VARCHAR(10) NOT NULL,
+    version TEXT NOT NULL,
+    rules JSONB NOT NULL,
+    weights JSONB DEFAULT '{}',
+    thresholds JSONB DEFAULT '{}',
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, target_lang, version)
+);
+
+CREATE INDEX idx_translation_rubrics_active ON translation_rubrics(target_lang, active);
+
+CREATE TABLE IF NOT EXISTS translation_corrections (
+    id SERIAL PRIMARY KEY,
+    run_id INT,
+    llm_call_id INT,
+    filename TEXT NOT NULL,
+    section_index INT,
+    section_type TEXT,
+    target_lang VARCHAR(10) NOT NULL,
+    source_text TEXT NOT NULL,
+    model_output TEXT,
+    corrected_output TEXT NOT NULL,
+    error_types JSONB DEFAULT '[]',
+    human_scores JSONB DEFAULT '{}',
+    reviewer TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_translation_corrections_file ON translation_corrections(filename, target_lang);
+
+CREATE TABLE IF NOT EXISTS human_review_queue (
+    id SERIAL PRIMARY KEY,
+    run_id INT,
+    llm_call_id INT,
+    filename TEXT NOT NULL,
+    section_index INT,
+    section_type TEXT,
+    target_lang VARCHAR(10) NOT NULL,
+    source_text TEXT NOT NULL,
+    model_output TEXT,
+    reason TEXT NOT NULL,
+    details JSONB DEFAULT '{}',
+    status VARCHAR(20) DEFAULT 'open',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_human_review_queue_status ON human_review_queue(status, target_lang, created_at);
 
 -- =============================================
 -- Weekly Reports — automated analytics
